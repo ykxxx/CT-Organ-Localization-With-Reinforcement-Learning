@@ -5,6 +5,7 @@ import logging
 import numpy as np
 
 from config import config
+from dataloader import *
 from agent import Agent
 from dqn import DQN
 from replay_buffer import Replay_Buffer

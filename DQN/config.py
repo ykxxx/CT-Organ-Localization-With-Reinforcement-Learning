@@ -1,15 +1,27 @@
 from easydict import EasyDict as edict
+import torch
 
 config = edict()
 
-config.dataset = ''
+# Dataset
+config.data_dir = "/Users/kexinyang/Desktop/HDSC 325/Project/data"
+config.dataset = ""
+config.batch_size = 4
+
+# Training parameter
 config.device = "cuda" if torch.cuda.is_available() else "cpu"
 config.training = True
 config.ad_hoc_structure = False
 config.log = True
 config.epsilon_exp = True
 config.soft_max = False
-config.print_prob = False
+
+# Environment
+config.max_steps = 50
+config.scan_dims = [225, 225, 50]
+config.alpha = 0.1
+config.tau = 0.85
+
 config.exp_folder = './'
 config.ckpt_path = 'CKPT'
 config.log_dir = './'
