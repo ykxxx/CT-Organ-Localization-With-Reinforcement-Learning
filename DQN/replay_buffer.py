@@ -1,22 +1,21 @@
-from collections import namedtuple, deque
+import collections
+Experience = collections.namedtuple('Experience', 
+           field_names=['state', 'action', 'reward', 'done', 'new_state'])
 
-from config import config
+class ExperienceReplay():
+  def __init__(self, capacity):
+      self.buffer = collections.deque(maxlen=capacity)
 
-Transition = namedtuple('Transition',
-                        ('state', 'action', 'next_state', 'reward'))
+  def __len__(self):
+      return len(self.buffer)
 
-
-class Replay_Buffer(object):
-
-    def __init__(self, capacity):
-        self.memory = deque([],maxlen=capacity)
-
-    def push(self, *args):
-        """Save a transition"""
-        self.memory.append(Transition(*args))
-
-    def sample(self, batch_size):
-        return random.sample(self.memory, batch_size)
-
-    def __len__(self):
-        return len(self.memory)
+  def append(self, experience):
+      self.buffer.append(experience)
+  
+  def sample(self, batch_size):
+      indices = np.random.choice(len(self.buffer), batch_size, replace=False)
+      states, actions, rewards, dones, next_states = zip([self.buffer[idx] for idx in indices])
+      return np.array(states), np.array(actions),
+      np.array(rewards,dtype=np.float32), 
+      np.array(dones, dtype=np.uint8),    
+      np.array(next_states)

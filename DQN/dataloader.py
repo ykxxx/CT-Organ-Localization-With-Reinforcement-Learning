@@ -120,11 +120,10 @@ class CT_DataLoader():
         self.dataloader = DataLoader(self.dataset, batch_size=self.batch_size)
 
 
-    def sample_scan_circular(self, shuffle=False):
+    def sample_scan_circular(self):
         '''
         return a  CT scan data from the dataloader
         '''
-        
         image, label = next(iter(self.dataloader))
 
         return image[0][0], label[0][0]
