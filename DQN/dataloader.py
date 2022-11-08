@@ -4,19 +4,9 @@ from monai.config import KeysCollection
 from monai.transforms import (
     Transform,
     MapTransform,
-    Randomizable,
-    AsDiscrete,
-    AsDiscreted,
     EnsureChannelFirstd,
     Compose,
-    CropForegroundd,
     LoadImaged,
-    Orientationd,
-    RandCropByPosNegLabeld,
-    SaveImaged,
-    ScaleIntensityRanged,
-    Spacingd,
-    Invertd,
 )
 from monai.handlers.utils import from_engine
 from monai.networks.nets import UNet
@@ -30,8 +20,6 @@ from monai.apps import download_and_extract
 from monai.transforms.utils import generate_spatial_bounding_box
 import torch
 import matplotlib.pyplot as plt
-import tempfile
-import shutil
 import os
 import glob
 import random
@@ -39,6 +27,29 @@ import numpy as np
 
 from config import config
 
+
+class ApplyWindowing(MapTransform):
+  def __init__(self, keys: KeysCollection, window_center, window_width):
+      super().__init__(keys)
+      self.window_center = window_center
+      self.window_width = window_width
+      self.pixel_low = self.window_center - self.window_width / 2
+      self.pixel_high = self.window_center + self.window_width / 2
+  
+  def select(self, data):
+
+      data = torch.where(data < self.pixel_low, self.pixel_low, data)
+      data = torch.where(data > self.pixel_high, self.pixel_high, data)
+
+      data_norm = (data - torch.min(data)) / (torch.max(data) - torch.min(data))
+
+      return data_norm
+
+  def __call__(self, img):
+      d = dict(img)
+      for key in self.key_iterator(d):
+          d[key] = self.select(d[key])
+      return d
 
 class SelectTargetClass(MapTransform):
     def __init__(self, keys: KeysCollection, target_class):
@@ -83,7 +94,7 @@ class GetBoundingBox(MapTransform):
 class CT_DataLoader():
     def __init__(self, mode="train"):
 
-        self.mode = config.model
+        self.mode = mode 
         self.data_dir = config.data_dir
         self.batch_size = config.batch_size
 
@@ -99,31 +110,49 @@ class CT_DataLoader():
             for image_name, label_name in zip(self.images, self.labels)
         ]
 
-        self.transformed_data = Compose(
-                [
-                    LoadImaged(keys=["image", "label"]),
-                    EnsureChannelFirstd(keys=["image", "label"]),
-                    # TODO: scale image to same size
-                    ScaleIntensityRanged(
-                        keys=["image"], a_min=-57, a_max=164,
-                        b_min=0.0, b_max=1.0, clip=True,
-                    ),
-                    Orientationd(keys=["image", "label"], axcodes="RAS"),
-                    Spacingd(keys=["image", "label"], pixdim=(
-                        1.5, 1.5, 2.0), mode=("bilinear", "nearest")),
+        self.transformed_data = Compose([
+                    LoadImaged(keys=["image", "label"]), 
+                    ApplyWindowing(keys=["image"], window_center=40, window_width=400),
                     SelectTargetClass(keys=["label"], target_class = 6), 
-                    GetBoundingBox(keys=["label"])
-                ]
-            )
+                    GetBoundingBox(keys=["label"]),
+                    EnsureChannelFirstd(keys=["image"]),])
 
-        self.dataset = Dataset(data=self.data_dict, transform=self.transformed_data)
-        self.dataloader = DataLoader(self.dataset, batch_size=self.batch_size)
+        self.dataset = Dataset(data=self.data_dicts, transform=self.transformed_data)
+        # self.dataloader = DataLoader(self.dataset, batch_size=self.batch_size)
 
 
-    def sample_scan_circular(self):
+    def sample_circular(self, id = None):
         '''
         return a  CT scan data from the dataloader
         '''
-        image, label = next(iter(self.dataloader))
+        
+        # sample_batch = next(iter(self.dataloader))
 
-        return image[0][0], label[0][0]
+        # # batch_size * h * w * d
+        # image = sample_batch["image"][0]
+        # # list: length 2
+        # label = sample_batch["label"]
+        data_size = len(self.dataset)
+        if id == None:
+          idx = np.random.randint(data_size, size=1)[0]
+        else:
+          idx = id
+      
+        return self.dataset[idx]["image"], self.dataset[idx]["label"]
+
+
+def main():
+    # Test functionality of CT_DataLoader
+
+    train_loader = CT_DataLoader(mode = "train")
+    test_loader = CT_DataLoader(mode = "test")
+
+    # sample_batch = next(iter(train_loader.dataloader))
+    image, label= train_loader.sample_circular()
+
+    pr
+    int(image.shape)
+    print(label)
+
+    fig, ax = plt.subplots()
+    ax.imshow(image[0, :, :, 60],cmap='gray', interpolation=None)
