@@ -22,10 +22,9 @@ class MedicalPlayer(gym.Env):
     Each time-step, the agent chooses an action, and the environment returns
     an observation and a reward."""
 
-    def __init__(self, train_mode=False,
-                 screen_dims=(45, 45, 45), history_length= 4, action_step=10,
-                 max_num_frames=1000, agents=1, reward_method='binary',
-                 oscillations_allowed=4, logger=None):
+    def __init__(self, train_mode=False, agents=1, screen_dims=(45, 45, 45), 
+                 history_length= 4, action_step_ratio=0.1, min_action_len=10,
+                 reward_method='binary', oscillations_allowed=4, logger=None):
         """
         :param train_directory: environment or game name
         :param viz: visualization
@@ -48,8 +47,7 @@ class MedicalPlayer(gym.Env):
 
         # counter to limit number of steps per episodes
         self.cnt = 0
-        # maximum number of frames (steps) per episodes
-        self.max_num_frames = max_num_frames
+
         # stores information: terminal, score, distError
         self.info = None
       
@@ -60,8 +58,11 @@ class MedicalPlayer(gym.Env):
         self.screen_dims = screen_dims 
         self.dims = len(self.screen_dims)
         
-        # multi-scale agent
-        self.action_step = action_step
+        # how much scale to move for each action 
+        self.action_step_ratio = action_step_ratio
+
+        # the minimum length for each bounding box axis below which no action whill be performed
+        self.min_action_len = min_action_len
 
         # init env dimensions
         self.width, self.height, self.depth = screen_dims
@@ -147,7 +148,7 @@ class MedicalPlayer(gym.Env):
         # TODO: add it as a parameter to the class
         cover_percent = 0.5
 
-        # H * W* D
+        # H * W * D
         batch_size, self.image_height, self.image_width, self.image_depth = self._image.shape
         
         # start coordinates pf bounding box
@@ -162,8 +163,6 @@ class MedicalPlayer(gym.Env):
         
         # image volume size
         self._image_dims = self._image[0].shape
-
-        #######################################################################
 
         #######################################################################
 
@@ -209,13 +208,9 @@ class MedicalPlayer(gym.Env):
 
         union_v = box1_v + box2_v - intersect_v
 
-        # print(intersect_v/union_v)
-        # print("Iou Debug")
-
         return intersect_v/union_v
 
-
-    def step(self, act, q_values, isOver):
+    def step(self, act, q_values):
         """The environment's step function returns exactly what we need.
         Args:
           act:
@@ -248,248 +243,122 @@ class MedicalPlayer(gym.Env):
         self.terminal = [False] * self.agents
         go_out = [False] * self.agents
 
-        # agent i movement
+        # take a step of action for agent i
         for i in range(self.agents):
+
+            x1, y1, z1 = current_loc[i][0]
+            x2, y2, z2 = current_loc[i][1]
+
+            x_step = round((x2 - x1) * self.action_step_ratio) if x2 - x1 > self.min_action_len else 0
+            y_step = round((y2 - y1) * self.action_step_ratio) if y2 - y1 > self.min_action_len else 0
+            z_step = round((z2 - z1) * self.action_step_ratio) if z2 - z1 > self.min_action_len else 0
+
             # UP Z+ -----------------------------------------------------------
             if (act[i] == 0):
-
-                next_location[i] = ((
-                    current_loc[i][0][0],current_loc[i][0][1],
-                    round(current_loc[i][0][2] +self.action_step)),
-                    (current_loc[i][1][0], current_loc[i][1][1],
-                    round(current_loc[i][1][2] +self.action_step) ))
-                
-                if (next_location[i][1][2] >= self._image_dims[2]):
-                    # print(' trying to go out the image Z+ ',)
-                    next_location[i] = current_loc[i]
-                    go_out[i] = True
+                next_location[i] = ((x1, y1, round(z1 + z_step)),
+                                    (x2, y2, round(z2 + z_step)))
 
             # FORWARD Y+ ------------------------------------------------------
             if (act[i] == 1):
-                next_location[i] = ((
-                    current_loc[i][0][0],
-                    round(current_loc[i][0][1] + self.action_step),
-                    current_loc[i][0][2]),
-                    (
-                    current_loc[i][1][0],
-                    round(current_loc[i][1][1] + self.action_step),
-                    current_loc[i][1][2]))
-                if (next_location[i][1][1] >= self._image_dims[1]):
-                    # print(' trying to go out the image Y+ ',)
-                    next_location[i] = current_loc[i]
-                    go_out[i] = True
+                next_location[i] = ((x1, round(y1 + y_step), z1),
+                                    (x2, round(y2 + y_step), z2))
+
             # RIGHT X+ --------------------------------------------------------
             if (act[i] == 2):
-                next_location[i] = ((
-                    round(current_loc[i][0][0] +self.action_step),
-                    current_loc[i][0][1],
-                    current_loc[i][0][2]),
-                    (round(current_loc[i][1][0] +self.action_step),
-                    current_loc[i][1][1],
-                    current_loc[i][1][2]) )
-                if next_location[i][1][0] >= self._image_dims[0]:
-                    # print(' trying to go out the image X+ ',)
-                    next_location[i] = current_loc[i]
-                    go_out[i] = True
+                next_location[i] = ((round(x1 + x_step), y1, z1), 
+                                    (round(x2 + x_step), y2, z2))
+
             # LEFT X- ---------------------------------------------------------
             if act[i] == 3:
-                next_location[i] = ((
-                    round(current_loc[i][0][0] - self.action_step),
-                    current_loc[i][0][1],
-                    current_loc[i][0][2]),
-                    (round(current_loc[i][1][0]  - self.action_step),
-                    current_loc[i][1][1],
-                    current_loc[i][1][2]) )
-                if next_location[i][0][0] <= 0:
-                    # print(' trying to go out the image X- ',)
-                    next_location[i] = current_loc[i]
-                    go_out[i] = True
+                next_location[i] = ((round(x1 - x_step), y1, z1),
+                                    (round(x2 - x_step), y2, z2))
+
             # BACKWARD Y- -----------------------------------------------------
             if act[i] == 4:
-                next_location[i] = ((
-                    current_loc[i][0][0],
-                    round(current_loc[i][0][1] -self.action_step),
-                    current_loc[i][0][2]),
-                    (
-                    current_loc[i][1][0],
-                    round(current_loc[i][1][1] -self.action_step),
-                    current_loc[i][1][2]))
+                next_location[i] = ((x1, round(y1 - y_step), z1),
+                                    (x2, round(y2 - y_step), z2))
                 
-                if next_location[i][0][1] <= 0:
-                    # print(' trying to go out the image Y- ',)
-                    next_location[i] = current_loc[i]
-                    go_out[i] = True
+
             # DOWN Z- ---------------------------------------------------------
             if act[i] == 5:
-                next_location[i] = ((
-                    current_loc[i][0][0], current_loc[i][0][1],
-                    round(current_loc[i][0][2] - self.action_step)),
-                    (current_loc[i][1][0], current_loc[i][1][1],
-                    round(current_loc[i][1][2] - self.action_step) ))
-                if next_location[i][0][2] <= 0:
-                    # print(' trying to go out the image Z- ',)
-                    next_location[i] = current_loc[i]
-                    go_out[i] = True
+                next_location[i] = ((x1, y1, round(z1 - z_step)),
+                                    (x2, y2, round(z2 - z_step)))
+
             # scaling s+ ---------------------------------------------------------
             if act[i] == 6:
-                next_location[i] = ((
-                    round(current_loc[i][0][0] - self.action_step/2),
-                    round(current_loc[i][0][1] - self.action_step/2),
-                    round(current_loc[i][0][2] - self.action_step/2)),
-                    (round(current_loc[i][1][0] + self.action_step/2),
-                     round(current_loc[i][1][1] + self.action_step/2),
-                     round(current_loc[i][1][2] + self.action_step/2),
-                     ))
-                if (next_location[i][1][2] >= self._image_dims[2] or 
-                    next_location[i][1][1] >= self._image_dims[1] or 
-                    next_location[i][1][0] >= self._image_dims[0] or
-                    next_location[i][0][0] <= 0 or 
-                    next_location[i][0][1] <= 0 or 
-                    next_location[i][0][2] <= 0):
-                    
-                    next_location[i] = current_loc[i]
-                    go_out[i] = True
+                next_location[i] = ((round(x1 - x_step / 2),
+                                     round(y1 - y_step / 2),
+                                     round(z1 - z_step / 2)),
+                                    (round(x2 + x_step / 2),
+                                     round(y2 + y_step / 2),
+                                     round(z2 + z_step / 2)))
+
             # scaling s- ---------------------------------------------------------
             if act[i] == 7:
-                next_location[i] = ((
-                    round(current_loc[i][0][0] + self.action_step/2),
-                    round(current_loc[i][0][1] + self.action_step/2),
-                    round(current_loc[i][0][2] + self.action_step/2)),
-                    (round(current_loc[i][1][0] - self.action_step/2),
-                     round(current_loc[i][1][1] - self.action_step/2),
-                     round(current_loc[i][1][2] - self.action_step/2),
-                     ))
-                if (next_location[i][1][2] >= self._image_dims[2] or 
-                    next_location[i][1][1] >= self._image_dims[1] or 
-                    next_location[i][1][0] >= self._image_dims[0] or
-                    next_location[i][0][0] <= 0 or 
-                    next_location[i][0][1] <= 0 or 
-                    next_location[i][0][2] <= 0):
-                   
-                    next_location[i] = current_loc[i]
-                    go_out[i] = True
+                next_location[i] = ((round(x1 + x_step / 2),
+                                     round(y1 + y_step / 2),
+                                     round(z1 + z_step / 2)),
+                                    (round(x2 - x_step / 2),
+                                     round(y2 - y_step / 2),
+                                     round(z2 - z_step / 2)))
+
             # deformation dx (thinner) ---------------------------------------------------------
             if act[i] == 8:
-                next_location[i] = ((
-                    round(current_loc[i][0][0] - self.action_step/2),
-                    round(current_loc[i][0][1]),
-                    round(current_loc[i][0][2])),
-                    (round(current_loc[i][1][0] + self.action_step/2),
-                     round(current_loc[i][1][1]),
-                     round(current_loc[i][1][2]),
-                     ))
-                if (next_location[i][1][0] >= self._image_dims[0] or 
-                    next_location[i][0][0] <= 0 
-                    ):
-                    # print(' trying to go out the image x- or x+ ',)
-                    next_location[i] = current_loc[i]
-                    go_out[i] = True
+                next_location[i] = ((round(x1 - x_step / 2), y1, z1),
+                                    (round(x2 + x_step / 2), y2, z2))
+
             # deformation dy (flatter)---------------------------------------------------------
             if act[i] == 9:
-                next_location[i] = ((
-                    round(current_loc[i][0][0]),
-                    round(current_loc[i][0][1] - self.action_step/2),
-                    round(current_loc[i][0][2])),
-                    (round(current_loc[i][1][0]),
-                     round(current_loc[i][1][1] + self.action_step/2),
-                     round(current_loc[i][1][2]),
-                     ))
-                if (next_location[i][1][1] >= self._image_dims[1] or 
-                    next_location[i][0][1] <= 0 
-                    ):
-                    # print(' trying to go out the image y- or y+ ',)
-                    next_location[i] = current_loc[i]
-                    go_out[i] = True
+                next_location[i] = ((x1, round(y1 - y_step / 2), z1),
+                                    (x2, round(y2 + y_step / 2), z2))
+
             # deformation dz (taller) ---------------------------------------------------------
             if act[i] == 10:
-                next_location[i] = ((
-                    round(current_loc[i][0][0] ),
-                    round(current_loc[i][0][1] ),
-                    round(current_loc[i][0][2] - self.action_step/2)),
-                    (round(current_loc[i][1][0] ),
-                     round(current_loc[i][1][1] ),
-                     round(current_loc[i][1][2] + self.action_step/2),
-                     ))
-                if (next_location[i][1][2] >= self._image_dims[2] or 
-                    next_location[i][0][2] <= 0 
-                    ):
-                    # print(' trying to go out the image Z- or z+ ',)
-                    next_location[i] = current_loc[i]
-                    go_out[i] = True
+                next_location[i] = ((x1, y1, round(z1 - z_step)),
+                                    (x2, y2, round(z2 + z_step)))
             
-            # -----------------------------------------------------------------
+            # check if the bounding box is out of bound
+            if (next_location[i][1][2] >= self.image_depth or 
+                next_location[i][1][1] >= self.image_height or 
+                next_location[i][1][0] >= self.image_width or
+                next_location[i][0][0] <= 0 or 
+                next_location[i][0][1] <= 0 or 
+                next_location[i][0][2] <= 0):
+                
+                next_location[i] = ((max(0, next_location[i][0][0]),
+                                     max(0, next_location[i][0][1]),
+                                     max(0, next_location[i][0][2])),
+                                    (min(self.image_width - 1, next_location[i][1][0]),
+                                     min(self.image_height - 1, next_location[i][1][1]),
+                                     min(self.image_depth - 1, next_location[i][1][2])))
+                go_out[i] = True
 
         #######################################################################
-
-        if self.train_mode:
-            for i in range(self.agents):
-                # punish -1 reward if the agent tries to go out
-                if go_out[i]:
-                    self.reward[i] = -1
-                else:
-                    self.reward[i] = self._calc_reward(current_loc[i], next_location[i])
 
         # update screen, curr_image, reward ,location, terminal
         self._location = next_location
         self._box_image = [self._image[:, self._location[i][0][0]:self._location[i][1][0]+1, self._location[i][0][1]:self._location[i][1][1]+1, self._location[i][0][2]:self._location[i][1][2]+1].squeeze(0) for i in range(self.agents)]
         self._screen = self._current_state()
 
-        # terminate if the distance is less than 1 during trainig
         if self.train_mode:
             for i in range(self.agents):
-                if self.curr_iou[i] > 0.8:
-                    print(f"IOU of agent {i} is >= 0.8")
-                    self.terminal[i] = True
-                    # self.num_success[i].feed(1)
+                # punish -1 reward if the agent tries to go out
+                if go_out[i]:
+                    self.reward[i] = -1
+                # else calculating rewards for each agent
+                else:
+                    self.reward[i] = self._calc_reward(current_loc[i], next_location[i])
 
-        """
-        # terminate if maximum number of steps is reached
-        self.cnt += 1
-        if self.cnt >= self.max_num_frames:
-            for i in range(self.agents):
-                self.terminal[i] = True
-        """
-
-        # update history buffer with new location and qvalues
-        if self.train_mode:
-            for i in range(self.agents):
+                # calculate current iou for the new bounding box location
                 self.curr_iou[i] = self.calcIou(self._location[i], self._target_loc)
 
+                # ternimate game if the current iou is above the terminate treshold
+                if self.curr_iou[i] > config.terminate_iou:
+                    self.terminal[i] = True
+
         self._update_history()
-        # check if agent oscillates
-        # if self._oscillate:
-        #     self._location = self.getBestLocation()
-        #     # self._location=[item for sublist in temp for item in sublist]
-        #     self._screen = self._current_state()
 
-        #     if self.task != 'play':
-        #         for i in range(self.agents):
-        #             self.curr_iou[i] = self.calcIou(self._location[i],
-        #                                                  self._target_loc)
-
-        #     # multi-scale steps
-        #     if self.multiscale:
-        #         if self.xscale > 1:
-        #             self.xscale -= 1
-        #             self.yscale -= 1
-        #             self.zscale -= 1
-        #             self.action_step = int(self.action_step / 3)
-        #             self._clear_history()
-        #         # terminate if scale is less than 1
-        #         else:
-        #             for i in range(self.agents):
-        #                 self.terminal[i] = True
-        #                 # if self.curr_iou[i] <= 1:
-        #                 #     self.num_success[i].feed(1)
-        #     else:
-        #         for i in range(self.agents):
-        #             self.terminal[i] = True
-        #             # if self.curr_iou[i] <= 1:
-        #             #     self.num_success[i].feed(1)
-       
-        # for i in range(self.agents):
-        #     self.current_episode_score[i].feed(self.reward[i])
-
+        # update the current game info
         info = {}
         for i in range(self.agents):
             info[f"reward_{i}"] = self.reward[0]
@@ -502,6 +371,7 @@ class MedicalPlayer(gym.Env):
             info[f"landmark_xpos_{i}"] = (self._target_loc[0][0], self._target_loc[1][0])
             info[f"landmark_ypos_{i}"] = (self._target_loc[0][1], self._target_loc[1][1])
             info[f"landmark_zpos_{i}"] = (self._target_loc[0][2], self._target_loc[1][2])
+
         return self._screen, self.reward, self.terminal, info
 
     def getBestLocation(self):
@@ -569,104 +439,13 @@ class MedicalPlayer(gym.Env):
           W = self._location[i][1][1] - self._location[i][0][1] + 1# y2[i] - y1[i]
           D = self._location[i][1][2] - self._location[i][0][2] + 1# z2[i] - z1[i]
 
-          # print(self._box_image[i].min(), self._box_image[i].max() )
-          # print(self._box_image)
           observation = torch.permute(self._box_image[i], (2, 0, 1)).view(1, 1, D, H, W)
           grid = F.affine_grid(theta=theta.unsqueeze(0), size=(1, 1) + self.screen_dims)
           output = F.grid_sample(input=observation, grid=grid, mode= "bilinear")
-          # print(output)
+
           # convert the output shape back to H x W x D
           screen[i] = torch.permute(output.view(self.screen_dims[0], self.screen_dims[1], self.screen_dims[2]), (1, 2, 0))
-          # self.rectangle[i] = Rectangle(xmin, xmax,
-          #                                 ymin, ymax,
-          #                                 zmin, zmax)
         return screen
-        
-
-        # for i in range(self.agents):
-        #     # screen uses coordinate system relative to origin (0, 0, 0)
-        #     screen_xmin, screen_ymin, screen_zmin = 0, 0, 0
-        #     screen_xmax, screen_ymax, screen_zmax = self.screen_dims
-
-        #     # extract boundary locations using coordinate system relative to
-        #     # "global" image
-        #     # width, height, depth in terms of screen coord system
-
-        #     if self.xscale % 2:
-        #         xmin = self._location[i][0] - \
-        #             int(self.width * self.xscale / 2) - 1
-        #         xmax = self._location[i][0] + int(self.width * self.xscale / 2)
-        #         ymin = self._location[i][1] - \
-        #             int(self.height * self.yscale / 2) - 1
-        #         ymax = self._location[i][1] + \
-        #             int(self.height * self.yscale / 2)
-        #         zmin = self._location[i][2] - \
-        #             int(self.depth * self.zscale / 2) - 1
-        #         zmax = self._location[i][2] + int(self.depth * self.zscale / 2)
-        #     else:
-        #         xmin = self._location[i][0] - \
-        #             round(self.width * self.xscale / 2)
-        #         xmax = self._location[i][0] + \
-        #             round(self.width * self.xscale / 2)
-        #         ymin = self._location[i][1] - \
-        #             round(self.height * self.yscale / 2)
-        #         ymax = self._location[i][1] + \
-        #             round(self.height * self.yscale / 2)
-        #         zmin = self._location[i][2] - \
-        #             round(self.depth * self.zscale / 2)
-        #         zmax = self._location[i][2] + \
-        #             round(self.depth * self.zscale / 2)
-
-        #     ###########################################################
-
-        #     # check if they violate image boundary and fix it
-        #     if xmin < 0:
-        #         xmin = 0
-        #         screen_xmin = screen_xmax - \
-        #             len(np.arange(xmin, xmax, self.xscale))
-        #     if ymin < 0:
-        #         ymin = 0
-        #         screen_ymin = screen_ymax - \
-        #             len(np.arange(ymin, ymax, self.yscale))
-        #     if zmin < 0:
-        #         zmin = 0
-        #         screen_zmin = screen_zmax - \
-        #             len(np.arange(zmin, zmax, self.zscale))
-        #     if xmax > self._image_dims[0]:
-        #         xmax = self._image_dims[0]
-        #         screen_xmax = screen_xmin + \
-        #             len(np.arange(xmin, xmax, self.xscale))
-        #     if ymax > self._image_dims[1]:
-        #         ymax = self._image_dims[1]
-        #         screen_ymax = screen_ymin + \
-        #             len(np.arange(ymin, ymax, self.yscale))
-        #     if zmax > self._image_dims[2]:
-        #         zmax = self._image_dims[2]
-        #         screen_zmax = screen_zmin + \
-        #             len(np.arange(zmin, zmax, self.zscale))
-
-        #     # crop image data to update what network sees
-        #     # image coordinate system becomes screen coordinates
-        #     # scale can be thought of as a stride
-        #     screen[i,
-        #            screen_xmin:screen_xmax,
-        #            screen_ymin:screen_ymax,
-        #            screen_zmin:screen_zmax] = self._image[i].data[
-        #         xmin:xmax:self.xscale,
-        #         ymin:ymax:self.yscale,
-        #         zmin:zmax:self.zscale]
-
-        #     ###########################################################
-        #     # update rectangle limits from input image coordinates
-        #     # this is what the network sees
-        #     self.rectangle[i] = Rectangle(xmin, xmax,
-        #                                   ymin, ymax,
-        #                                   zmin, zmax)
-        # return screen
-
-    # Should the argument agent not be renamed to image rather?
-    def get_plane(self, z=0, agent=0):
-        return self._image[agent].data[:, :, z]
 
     def _calc_reward(self, current_loc, next_loc):
         """
@@ -679,8 +458,6 @@ class MedicalPlayer(gym.Env):
         if self.reward_method == 'binary':
             return  1 if next_iou > curr_iou else -1
 
-
-    # TODO: does this not return the oscillation for the first agent only?
     @property
     def _oscillate(self):
         """ Return True if all agents are stuck and oscillating
@@ -698,18 +475,6 @@ class MedicalPlayer(gym.Env):
             elif freq[0][1] < self.oscillations_allowed:
                 return False
         return True
-
-    def get_action_meanings(self):
-        """ return array of integers for actions"""
-        ACTION_MEANING = {
-            1: "UP",  # MOVE Z+
-            2: "FORWARD",  # MOVE Y+
-            3: "RIGHT",  # MOVE X+
-            4: "LEFT",  # MOVE X-
-            5: "BACKWARD",  # MOVE Y-
-            6: "DOWN",  # MOVE Z-
-        }
-        return [ACTION_MEANING[i] for i in self.actions]
 
     @property
     def getScreenDims(self):
@@ -750,8 +515,8 @@ class FrameStack(gym.Wrapper):
         self.frames.append(obs)
         return self._observation()
 
-    def step(self, action, q_values, done):
-        obs, reward, done, info = self.env.step(action, q_values, done)
+    def step(self, action, q_values):
+        obs, reward, done, info = self.env.step(action, q_values)
         # when exceed its max_len, deque will automatially pop from its left
         self.frames.append(obs)
         return self._observation(), reward, done, info

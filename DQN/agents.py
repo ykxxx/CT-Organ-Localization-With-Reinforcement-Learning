@@ -41,6 +41,10 @@ class Agents():
         self.target_network.load_state_dict(self.q_network.state_dict())
 
     def save_model(self, model_name="dqn.pt"):
+
+        if not os.path.exists(config.log_folder):
+            os.makedirs(config.model_folder)
+
         model_path = os.path.join(config.model_folder, model_name)
         torch.save(self.q_network.state_dict(), model_path)
 

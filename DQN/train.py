@@ -11,6 +11,25 @@ from agents import Agents
 from dqn import Network3D
 from replay_buffer import ReplayMemory
 from medical_env import MedicalPlayer, FrameStack
+from datetime import datetime
+
+
+def prepare_logger():
+    time_stamp = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+    log_path = os.path.join(config.log_folder, time_stamp + "_" + config.log_file)
+
+    if not os.path.exists(config.log_folder):
+        os.makedirs(config.log_folder)
+
+    logger = logging.getLogger()
+    logger.handlers = []
+    file_handler = logging.FileHandler(log_path)
+    console_handler = logging.StreamHandler(sys.stdout)
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
+    logger.setLevel(logging.INFO)
+
+    return logger
 
 
 def set_reproducible():
@@ -18,6 +37,7 @@ def set_reproducible():
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
     np.random.seed(0)
+
 
 def init_buffer(env, agents, num_agents, buffer, epsilon, init_memory_size=None):
 
@@ -36,7 +56,7 @@ def init_buffer(env, agents, num_agents, buffer, epsilon, init_memory_size=None)
         for _ in range(config.steps_per_episode):
             steps += 1
             acts, q_values = agents.get_next_actions(obs, epsilon)
-            obs, reward, terminal, info = env.step(acts, q_values, terminal)
+            obs, reward, terminal, info = env.step(acts, q_values)
             buffer.append((obs[:, -1, :, :, :], acts, reward, terminal))
 
             if all(t for t in terminal):
@@ -48,7 +68,7 @@ def init_buffer(env, agents, num_agents, buffer, epsilon, init_memory_size=None)
 
     #return buffer
 
-def train(env, agents, num_agents, buffer):
+def train(env, agents, num_agents, buffer, logging):
     
     set_reproducible()
         
@@ -75,7 +95,7 @@ def train(env, agents, num_agents, buffer):
             # index = buffer.append_obs(obs)
             
             acts, q_values = agents.get_next_actions(buffer.recent_state(), epsilon)
-            next_obs, reward, terminal, info = env.step(np.copy(acts), q_values, terminal)
+            next_obs, reward, terminal, info = env.step(np.copy(acts), q_values)
             buffer.append((next_obs[:, -1, :, :, :], acts, reward, terminal))
 
             # buffer.append_effect((index, obs, acts, reward, terminal))
@@ -103,18 +123,20 @@ def train(env, agents, num_agents, buffer):
             print_iou = round(np.mean(cum_iou) / config.train_frequency, 3)
             print_terminal = round(np.mean(cum_complete_game) / config.train_frequency, 3)
 
-            print(f"[{episode}] epsilon: {round(epsilon, 3)}, loss: {round(loss, 3)}, score: {print_score}, iou: {print_iou}, complete game: {print_terminal}")
+            msg = f"[{episode}] epsilon: {round(epsilon, 3)},loss: {round(loss, 3)}, score: {print_score}, iou: {print_iou}, complete game: {print_terminal}"
+            logging.info(msg)
+            #print(msg)
 
+            # reset scores, iou, complete_game
             cum_scores = [0] * num_agents
             cum_iou = [0] * num_agents
             cum_complete_game = [0] * num_agents
-
 
         if episode % config.update_frequency == 0:
             agents.copy_to_target_network()
 
         if episode % config.save_frequency == 0:
-            agents.save_model(config.model_name)
+            agents.save_model(f"{config.model_name}_e{episode}.pt")
             agents.scheduler.step()
 
 
@@ -122,16 +144,18 @@ def main():
 
     train_mode = True
     screen_dims = tuple(config.screen_dims)
-    max_num_frames = 100
-    max_memory_size = 100
-    history_length = 4
-    num_agents = 1
-    num_actions = 11
-    action_step = 10
+    max_memory_size = config.max_memory_size
+    history_length = config.history_length
+    num_agents = config.num_agents
+    num_actions = config.num_actions
+    action_step_ratio = config.action_step_ratio
+    min_action_len = config.min_action_len
     reward_method = config.reward_method
 
-    env = MedicalPlayer(train_mode, screen_dims, history_length, action_step, max_num_frames, num_agents, reward_method)
-    wrapped_env = FrameStack(env, k=4)
+    logging = prepare_logger()
+
+    env = MedicalPlayer(train_mode, num_agents, screen_dims, history_length, action_step_ratio, min_action_len, reward_method)
+    wrapped_env = FrameStack(env, k=history_length)
 
     buffer = ReplayMemory(max_memory_size, screen_dims, history_length, num_agents)
 
@@ -140,7 +164,7 @@ def main():
     print("-" * 50)
     print("Start training")
 
-    train(wrapped_env, agents, num_agents, buffer)
+    train(wrapped_env, agents, num_agents, buffer, logging)
 
 
 if __name__ == "__main__":
