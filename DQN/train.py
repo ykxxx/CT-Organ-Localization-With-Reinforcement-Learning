@@ -46,17 +46,18 @@ def init_buffer(env, agents, num_agents, buffer, epsilon, init_memory_size=None)
 
     pbar.close()
 
-    return buffer
+    #return buffer
 
 def train(env, agents, num_agents, buffer):
     
     set_reproducible()
         
-    collected_buffer = init_buffer(env, agents, num_agents, buffer, config.epsilon_start)
+    init_buffer(env, agents, num_agents, buffer, config.epsilon_start)
 
     episode = 1
-    acc_steps = 0
-    epoch_distances = []
+    cum_scores = [0] * num_agents
+    cum_iou = [0] * num_agents
+    cum_complete_game = [0] * num_agents
 
     for episode in range(config.num_episode):
         # reset the environment at the beginning of the episode.
@@ -64,7 +65,6 @@ def train(env, agents, num_agents, buffer):
         buffer._hist.clear()
         terminal = [False for _ in range(num_agents)]
         losses = []
-        score = [0] * num_agents
 
         epsilon = config.epsilon_min + (config.epsilon_start - config.epsilon_min) \
                   * np.exp(-1 * episode / config.num_episode * config.epsilon_decay)
@@ -79,23 +79,35 @@ def train(env, agents, num_agents, buffer):
             buffer.append((next_obs[:, -1, :, :, :], acts, reward, terminal))
 
             # buffer.append_effect((index, obs, acts, reward, terminal))
-            score = [sum(x) for x in zip(score, reward)]
             # obs = next_obs
+
+            cum_scores = [sum(x) for x in zip(cum_scores, reward)]
 
             if all(t for t in terminal):
                 break
 
-        dist_error_list = [info['distError_' + str(i)] for i in range(num_agents)]
-        epoch_distances.append([info['distError_' + str(i)]
-                                for i in range(num_agents)])
+        iou_score_list = [info['iou_score_' + str(i)] for i in range(num_agents)]
+        complete_game_list = [info['complete_game_' + str(i)] for i in range(num_agents)]
+        cum_iou = [sum(x) for x in zip(cum_iou, iou_score_list)]
+        cum_complete_game = [sum(x) for x in zip(cum_complete_game, complete_game_list)]
+                
 
         if episode % config.train_frequency == 0:
-
+            
+            # states, actions, rewards, next_states, terminal
             mini_batch = buffer.sample(config.batch_size)
             loss = agents.train_q_network(mini_batch, config.gamma)
             losses.append(loss)
 
-            print(f"[{episode}] epsilon: {round(epsilon, 3)}, loss: {round(sum(losses), 4)}, score: {round(sum(score), 2)}, dist_error: {round(sum(dist_error_list), 2)}")
+            print_score = round(np.mean(cum_scores) / config.train_frequency, 2)
+            print_iou = round(np.mean(cum_iou) / config.train_frequency, 3)
+            print_terminal = round(np.mean(cum_complete_game) / config.train_frequency, 3)
+
+            print(f"[{episode}] epsilon: {round(epsilon, 3)}, loss: {round(loss, 3)}, score: {print_score}, iou: {print_iou}, complete game: {print_terminal}")
+
+            cum_scores = [0] * num_agents
+            cum_iou = [0] * num_agents
+            cum_complete_game = [0] * num_agents
 
 
         if episode % config.update_frequency == 0:
@@ -104,7 +116,6 @@ def train(env, agents, num_agents, buffer):
         if episode % config.save_frequency == 0:
             agents.save_model(config.model_name)
             agents.scheduler.step()
-            epoch_distances = []
 
 
 def main():

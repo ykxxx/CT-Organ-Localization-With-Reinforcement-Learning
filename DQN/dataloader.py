@@ -150,7 +150,6 @@ def main():
     # sample_batch = next(iter(train_loader.dataloader))
     image, label= train_loader.sample_circular()
 
-    pr
     int(image.shape)
     print(label)
 

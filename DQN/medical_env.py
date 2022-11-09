@@ -175,14 +175,14 @@ class MedicalPlayer(gym.Env):
         self._screen = self._current_state()
 
         if self.train_mode:
-            self.cur_dist = [
+            self.curr_iou = [
                 self.calcIou(
                     # location varies for agents, but target loc is fixed
                     self._location[i],
                     self._target_loc) 
                     for i in range(self.agents)]
         else:
-            self.cur_dist = [0, ] * self.agents
+            self.curr_iou = [0, ] * self.agents
 
     def calcIou(self, box1, box2):
         """ 
@@ -437,7 +437,7 @@ class MedicalPlayer(gym.Env):
         # terminate if the distance is less than 1 during trainig
         if self.train_mode:
             for i in range(self.agents):
-                if self.cur_dist[i] > 0.8:
+                if self.curr_iou[i] > 0.8:
                     print(f"IOU of agent {i} is >= 0.8")
                     self.terminal[i] = True
                     # self.num_success[i].feed(1)
@@ -453,7 +453,7 @@ class MedicalPlayer(gym.Env):
         # update history buffer with new location and qvalues
         if self.train_mode:
             for i in range(self.agents):
-                self.cur_dist[i] = self.calcIou(self._location[i], self._target_loc)
+                self.curr_iou[i] = self.calcIou(self._location[i], self._target_loc)
 
         self._update_history()
         # check if agent oscillates
@@ -464,7 +464,7 @@ class MedicalPlayer(gym.Env):
 
         #     if self.task != 'play':
         #         for i in range(self.agents):
-        #             self.cur_dist[i] = self.calcIou(self._location[i],
+        #             self.curr_iou[i] = self.calcIou(self._location[i],
         #                                                  self._target_loc)
 
         #     # multi-scale steps
@@ -479,24 +479,22 @@ class MedicalPlayer(gym.Env):
         #         else:
         #             for i in range(self.agents):
         #                 self.terminal[i] = True
-        #                 # if self.cur_dist[i] <= 1:
+        #                 # if self.curr_iou[i] <= 1:
         #                 #     self.num_success[i].feed(1)
         #     else:
         #         for i in range(self.agents):
         #             self.terminal[i] = True
-        #             # if self.cur_dist[i] <= 1:
+        #             # if self.curr_iou[i] <= 1:
         #             #     self.num_success[i].feed(1)
        
-
-        distance_error = self.cur_dist
         # for i in range(self.agents):
         #     self.current_episode_score[i].feed(self.reward[i])
 
         info = {}
         for i in range(self.agents):
-            # info[f"score_{i}"] = self.current_episode_score[i].sum
-            info[f"gameOver_{i}"] = self.terminal[i]
-            info[f"distError_{i}"] = distance_error[i]
+            info[f"reward_{i}"] = self.reward[0]
+            info[f"complete_game_{i}"] = 1 if self.terminal[i] else 0
+            info[f"iou_score_{i}"] = self.curr_iou[0]
            
             info[f"agent_xpos_{i}"] = (self._location[i][0][0], self._location[i][1][0]) 
             info[f"agent_ypos_{i}"] = (self._location[i][0][1], self._location[i][1][1]) 
